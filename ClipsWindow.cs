@@ -26,6 +26,17 @@ class ClipsWindow : Window
         AddHandler(DragDrop.DragOverEvent, OnDragOver);
         AddHandler(DragDrop.DropEvent, OnDrop);
 
+        Content = BuildLayout();
+    }
+
+    private Grid BuildLayout() => new Grid
+    {
+        RowDefinitions = new RowDefinitions("Auto,*"),
+        Children = { _statusMessageText, CreateDropZone() },
+    };
+
+    private Border CreateDropZone()
+    {
         var dropZone = new Border
         {
             Background = new SolidColorBrush(Color.Parse("#1c1c1c")),
@@ -50,14 +61,9 @@ class ClipsWindow : Window
         DragDrop.AddDragOverHandler(dropZone, OnDragOver);
         DragDrop.AddDropHandler(dropZone, OnDrop);
 
-        var contentGrid = new Grid
-        {
-            RowDefinitions = new RowDefinitions("Auto,*"),
-            Children = { _statusMessageText, dropZone }
-        };
-
         Grid.SetRow(dropZone, 1);
-        Content = contentGrid;
+        return dropZone;
+
     }
 
     private void OnDragOver(object? sender, DragEventArgs e)
@@ -90,7 +96,21 @@ class ClipsWindow : Window
                 e.Handled = true;
             }
             var result = await handler.FixClipAudioChannels(new AudioFixOptions(IncludeDiscord: false, IncludeMusic: false, IncludeDesktop: false, UseMaster: false));
-            _statusMessageText.Text = result.Success ? "Done!" : $"{result.FailCount} clip(s) failed: {string.Join(", ", result.Errors)}";
+            if (!result.IsSuccess)
+            {
+                // handle error later lol
+
+                return;
+            }
+            result = await handler.FrameBlendClips();
+            if (!result.IsSuccess)
+            {
+                // handler other error later lol
+                return;
+            }
+
+
+            _statusMessageText.Text = result.IsSuccess ? "Done!" : $"{result.FailCount} clip(s) failed: {string.Join(", ", result.Errors)}";
             _statusMessageText.IsVisible = true;
 
             e.Handled = true;
