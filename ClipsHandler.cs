@@ -5,7 +5,7 @@ public record AudioFixOptions(bool IncludeDiscord, bool IncludeMusic, bool Inclu
 
 public record FixResult(int SuccessCount, int FailCount, List<string> Errors)
 {
-    public bool Success => FailCount == 0;
+    public bool IsSuccess => FailCount == 0;
 }
 
 class ClipsHandler
@@ -50,7 +50,7 @@ class ClipsHandler
 
     public record ProcessResult(int SuccessCount, int FailCount, List<string> Errors)
     {
-        public bool Success => FailCount == 0 && Errors.Count == 0;
+        public bool IsSuccess => FailCount == 0 && Errors.Count == 0;
     };
 
     public async Task<ProcessResult> FixClipAudioChannels(AudioFixOptions options)
