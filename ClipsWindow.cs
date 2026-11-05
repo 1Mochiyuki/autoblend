@@ -8,7 +8,7 @@ class ClipsWindow : Window
 {
     private readonly TextBlock _statusMessageText = new TextBlock
     {
-        Text = "",
+        Text = string.Empty,
         HorizontalAlignment = HorizontalAlignment.Center,
         VerticalAlignment = VerticalAlignment.Center,
         Foreground = Brushes.Red,
@@ -16,24 +16,61 @@ class ClipsWindow : Window
         IsVisible = false
 
     };
+    private readonly Toolbar _toolbar = new();
+
+    private CancellationTokenSource? _workCts;
+    private Task _activeWork = Task.CompletedTask;
+
+
+    private readonly CheckBox frameBlendOnlyCheckbox = new()
+    {
+        Content = "Only Frameblend clips"
+    };
+
     public ClipsWindow()
     {
         Title = "Autoblend";
-        Width = 400;
-        Height = 350;
+        Width = 350;
+        Height = 400;
         SizeToContent = SizeToContent.Width;
         WindowStartupLocation = WindowStartupLocation.CenterScreen;
         AddHandler(DragDrop.DragOverEvent, OnDragOver);
         AddHandler(DragDrop.DropEvent, OnDrop);
 
+        _toolbar.SaveSettingsClicked += OnSaveSettingsClicked;
+        _toolbar.OpenLoggerClicked += OnOpenLoggerClicked;
+
         Content = BuildLayout();
     }
 
-    private Grid BuildLayout() => new Grid
+    private LoggerWindow? _loggerWindow;
+
+    private void OnOpenLoggerClicked(object? sender, EventArgs e)
     {
-        RowDefinitions = new RowDefinitions("Auto,*"),
-        Children = { _statusMessageText, CreateDropZone() },
-    };
+        if (_loggerWindow is { IsVisible: true })
+        {
+            _loggerWindow.Activate();
+            return;
+        }
+        _loggerWindow = new LoggerWindow();
+        _loggerWindow.Show();
+    }
+
+    private void OnSaveSettingsClicked(object? sender, EventArgs e)
+    {
+        _toolbar.ApplySettings(_toolbar.CaptureSettings);
+    }
+
+    private Grid BuildLayout()
+    {
+        Grid.SetRow(_statusMessageText, 1);
+
+        return new Grid
+        {
+            RowDefinitions = new RowDefinitions("Auto,Auto,*"),
+            Children = { _toolbar, _statusMessageText, CreateDropZone() },
+        };
+    }
 
     private Border CreateDropZone()
     {
@@ -58,10 +95,8 @@ class ClipsWindow : Window
         };
 
         DragDrop.SetAllowDrop(dropZone, true);
-        DragDrop.AddDragOverHandler(dropZone, OnDragOver);
-        DragDrop.AddDropHandler(dropZone, OnDrop);
 
-        Grid.SetRow(dropZone, 1);
+        Grid.SetRow(dropZone, 2);
         return dropZone;
 
     }
@@ -95,25 +130,79 @@ class ClipsWindow : Window
                 _statusMessageText.IsVisible = true;
                 e.Handled = true;
             }
-            var result = await handler.FixClipAudioChannels(new AudioFixOptions(IncludeDiscord: false, IncludeMusic: false, IncludeDesktop: false, UseMaster: false));
-            if (!result.IsSuccess)
+
+            var audioOptions = new AudioFixOptions(
+            CombineMicAudio: _toolbar.CombineMicAudio,
+            CombineGameAudio: _toolbar.CombineGameAudio,
+            CombineDiscordAudio: _toolbar.CombineDiscordAudio,
+            CombineMusicAudio: _toolbar.CombineMusicAudio,
+            CombineDesktopAudio: _toolbar.CombineDesktopAudio,
+            UseMaster: _toolbar.UseMaster,
+            RemoveEmptyAudioChannels: _toolbar.RemoveEmptyAudioChannels
+            );
+
+            _workCts?.Dispose();
+            _workCts = new CancellationTokenSource();
+            var ct = _workCts.Token;
+
+            try
             {
-                // handle error later lol
+                var fixTask = handler.FixClipAudioChannels(audioOptions, ct);
+                _activeWork = fixTask;
+                var result = await fixTask;
+                if (!result.IsSuccess)
+                {
+                    // handle error later lol
 
-                return;
+                    return;
+                }
+                var blendTask = handler.FrameBlendClips(ct);
+                _activeWork = blendTask;
+                result = await blendTask;
+                if (!result.IsSuccess)
+                {
+                    // handler other error later lol
+                    return;
+                }
+
+                _statusMessageText.Text = result.IsSuccess ? "Done!" : $"{result.FailCount} clip(s) failed: {string.Join(", ", result.Errors)}";
+                _statusMessageText.IsVisible = true;
             }
-            result = await handler.FrameBlendClips();
-            if (!result.IsSuccess)
+            catch (OperationCanceledException)
             {
-                // handler other error later lol
-                return;
+                _statusMessageText.Text = "Cancelled";
+                _statusMessageText.IsVisible = true;
             }
-
-
-            _statusMessageText.Text = result.IsSuccess ? "Done!" : $"{result.FailCount} clip(s) failed: {string.Join(", ", result.Errors)}";
-            _statusMessageText.IsVisible = true;
-
-            e.Handled = true;
+            finally
+            {
+                e.Handled = true;
+            }
         }
+    }
+
+    protected override async void OnClosing(WindowClosingEventArgs e)
+    {
+        if (_workCts is { IsCancellationRequested: false })
+        {
+            e.Cancel = true;
+            _statusMessageText.Text = "Cancelling";
+            _statusMessageText.IsVisible = true;
+            _workCts.Cancel();
+            try
+            {
+
+                await _activeWork;
+            }
+            catch (OperationCanceledException)
+            {
+                Console.WriteLine("hello");
+            }
+            catch (Exception)
+            {
+
+            }
+            Close();
+        }
+        base.OnClosing(e);
     }
 }
